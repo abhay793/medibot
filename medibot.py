@@ -1,4 +1,6 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU
+os.environ["TORCH_DEVICE"] = "cpu"
 import streamlit as st
 
 from langchain_huggingface import HuggingFaceEmbeddings
