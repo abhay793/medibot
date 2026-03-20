@@ -1,6 +1,13 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU
+import sys
+
+# MUST be before any torch/sentence-transformers imports
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TORCH_DEVICE"] = "cpu"
+os.environ["NO_CUDA"] = "1"
+
+
 import streamlit as st
 
 from langchain_huggingface import HuggingFaceEmbeddings
