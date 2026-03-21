@@ -1,5 +1,4 @@
 .env
-vectorstore/
 data/
 __pycache__/
 *.pyc
