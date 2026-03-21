@@ -6,168 +6,71 @@ from groq import Groq
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
 # =========================
-# LOAD DOCUMENTS FROM VECTORSTORE
+# CHECK VECTORSTORE
+# =========================
+
+def check_vectorstore():
+    """Check if vectorstore exists and show helpful message"""
+    
+    index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
+    index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
+    
+    if not os.path.exists(index_faiss_path) or not os.path.exists(index_pkl_path):
+        st.error("""
+        ### ❌ Medical Database Not Found
+        
+        The vectorstore files are missing. To fix this:
+        
+        **Option 1: Add PDFs to the data folder**
+        1. Create a `data` folder in your repository
+        2. Add your medical PDF files to the `data` folder
+        3. Push to GitHub and redeploy
+        
+        **Option 2: Create vectorstore locally and push**
+        1. Run `python creat_memory_for_llm.py` locally
+        2. Run `python extract_real_documents.py` to create documents.pkl
+        3. Push the `vectorstore` folder to GitHub
+        
+        **Option 3: Use the app without documents**
+        The app will work but will answer from general knowledge only.
+        """)
+        return False
+    
+    return True
+
+# =========================
+# LOAD DOCUMENTS
 # =========================
 
 @st.cache_resource
 def load_documents():
     """Load documents from vectorstore"""
     try:
-        # First try to load documents.pkl
+        # Check if documents.pkl exists
         docs_path = f"{DB_FAISS_PATH}/documents.pkl"
         
         if os.path.exists(docs_path):
             with open(docs_path, "rb") as f:
                 data = pickle.load(f)
                 if isinstance(data, list):
-                    st.success(f"✅ Loaded {len(data)} documents from documents.pkl")
+                    st.success(f"✅ Loaded {len(data)} medical documents")
                     return data
-                elif isinstance(data, dict) and 'documents' in data:
-                    st.success(f"✅ Loaded {len(data['documents'])} documents from documents.pkl")
-                    return data['documents']
         
-        # If no documents.pkl, try to load from index.pkl
-        index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
-        if os.path.exists(index_pkl_path):
-            with open(index_pkl_path, "rb") as f:
-                data = pickle.load(f)
-                
-                # Check if it contains documents
-                if isinstance(data, dict):
-                    # Try different keys
-                    for key in ['documents', 'chunks', 'docs', 'texts']:
-                        if key in data and data[key]:
-                            st.success(f"✅ Loaded {len(data[key])} documents from index.pkl ({key})")
-                            return data[key]
-                    
-                    # Check if it's a FAISS docstore
-                    if 'docstore' in data and hasattr(data['docstore'], '_dict'):
-                        docs = list(data['docstore']._dict.values())
-                        if docs:
-                            st.success(f"✅ Loaded {len(docs)} documents from FAISS docstore")
-                            return docs
+        # If no documents.pkl, check if index exists
+        if os.path.exists(f"{DB_FAISS_PATH}/index.faiss"):
+            st.info("📚 Vectorstore found but no documents.pkl. The app will work with basic functionality.")
         
-        # If still no documents, check if FAISS index exists
-        index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
-        if os.path.exists(index_faiss_path):
-            st.info("FAISS index found but no documents. The app will work with limited functionality.")
-            
         return []
-                
+        
     except Exception as e:
         st.error(f"Error loading documents: {e}")
         return []
-
-# =========================
-# CREATE SIMPLE DOCUMENTS FROM FAISS
-# =========================
-
-@st.cache_resource
-def create_simple_documents():
-    """Create simple documents if none found"""
-    try:
-        import faiss
-        
-        index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
-        if not os.path.exists(index_faiss_path):
-            return []
-        
-        # Load FAISS index to get number of vectors
-        index = faiss.read_index(index_faiss_path)
-        num_vectors = index.ntotal
-        
-        # Create simple document objects
-        documents = []
-        
-        class SimpleDocument:
-            def __init__(self, content, metadata):
-                self.page_content = content
-                self.metadata = metadata
-        
-        for i in range(min(num_vectors, 100)):
-            doc = SimpleDocument(
-                content=f"Medical document chunk {i+1} from the database",
-                metadata={"source": f"chunk_{i+1}", "chunk_id": i}
-            )
-            documents.append(doc)
-        
-        if documents:
-            st.info(f"Created {len(documents)} placeholder documents from FAISS index")
-        
-        return documents
-    except Exception as e:
-        st.error(f"Error creating documents: {e}")
-        return []
-
-# =========================
-# SIMPLE KEYWORD RETRIEVAL
-# =========================
-
-def get_relevant_docs(documents, query, k=3):
-    """Get relevant documents using simple keyword matching"""
-    if not documents:
-        return []
-    
-    # Stopwords to filter out common words
-    stopwords = {"what", "is", "the", "how", "a", "an", "of", "to", "in", "on", 
-                 "for", "with", "by", "at", "from", "as", "are", "was", "were", "be",
-                 "this", "that", "these", "those", "it", "they", "we", "you", "i"}
-    
-    # Extract keywords from query
-    query_words = [w.lower() for w in query.split() if w.lower() not in stopwords and len(w) > 2]
-    
-    if not query_words:
-        return documents[:k]
-    
-    # Score documents based on keyword matches
-    scored_docs = []
-    for doc in documents:
-        # Extract text from document
-        if hasattr(doc, 'page_content'):
-            doc_text = doc.page_content.lower()
-        elif isinstance(doc, dict):
-            doc_text = doc.get('page_content', '').lower()
-        else:
-            continue
-        
-        # Calculate score
-        score = sum(1 for word in query_words if word in doc_text)
-        if score > 0:
-            scored_docs.append((doc, score))
-    
-    # Sort by score and return top k
-    scored_docs.sort(key=lambda x: x[1], reverse=True)
-    return [doc for doc, _ in scored_docs[:k]]
-
-# =========================
-# EXTRACT DOCUMENT TEXT
-# =========================
-
-def extract_doc_text(doc):
-    """Extract text from document object"""
-    if hasattr(doc, 'page_content'):
-        return doc.page_content
-    elif isinstance(doc, dict):
-        return doc.get('page_content', '')
-    else:
-        return str(doc)
-
-def extract_doc_metadata(doc):
-    """Extract metadata from document object"""
-    if hasattr(doc, 'metadata'):
-        return doc.metadata
-    elif isinstance(doc, dict):
-        return doc.get('metadata', {})
-    else:
-        return {}
 
 # =========================
 # GROQ API CALL
 # =========================
 
 def get_groq_response(prompt, context=None):
-    """Call Groq API directly"""
-    
     api_key = st.secrets.get("GROQ_API_KEY", "")
     if not api_key:
         st.error("GROQ_API_KEY not found in secrets!")
@@ -176,7 +79,7 @@ def get_groq_response(prompt, context=None):
     client = Groq(api_key=api_key)
     
     if context:
-        full_prompt = f"""You are a medical assistant. Answer ONLY from the context provided below.
+        full_prompt = f"""You are a medical assistant. Answer ONLY from the context below.
 
 CONTEXT:
 {context}
@@ -201,11 +104,41 @@ ANSWER:"""
         return None
 
 # =========================
+# SIMPLE RETRIEVAL
+# =========================
+
+def get_relevant_docs(documents, query, k=3):
+    """Simple keyword-based retrieval"""
+    if not documents:
+        return []
+    
+    stopwords = {"what", "is", "the", "how", "a", "an", "of", "to", "in", "on"}
+    query_words = [w.lower() for w in query.split() if w.lower() not in stopwords and len(w) > 2]
+    
+    if not query_words:
+        return documents[:k]
+    
+    scored = []
+    for doc in documents:
+        text = doc.page_content.lower() if hasattr(doc, 'page_content') else str(doc).lower()
+        score = sum(1 for word in query_words if word in text)
+        if score > 0:
+            scored.append((doc, score))
+    
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [doc for doc, _ in scored[:k]]
+
+def extract_text(doc):
+    if hasattr(doc, 'page_content'):
+        return doc.page_content
+    return str(doc)
+
+# =========================
 # MAIN APP
 # =========================
 
 def main():
-    st.set_page_config(page_title="Health AI Medical Assistant", page_icon="🏥", layout="wide")
+    st.set_page_config(page_title="Health AI Medical Assistant", page_icon="🏥")
     st.title("🏥 Health AI Medical Assistant")
     
     # Check API key
@@ -213,20 +146,14 @@ def main():
         st.error("⚠️ GROQ_API_KEY not configured! Add it in Secrets.")
         st.stop()
     
-    # Check vectorstore files
-    index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
-    index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
+    # Check vectorstore
+    vectorstore_exists = check_vectorstore()
     
-    if not os.path.exists(index_faiss_path):
-        st.error(f"❌ Vectorstore not found at {DB_FAISS_PATH}/")
-        st.stop()
-    
-    # Load documents
-    with st.spinner("📚 Loading medical database..."):
-        documents = load_documents()
-        
-        if not documents:
-            documents = create_simple_documents()
+    # Load documents if vectorstore exists
+    documents = []
+    if vectorstore_exists:
+        with st.spinner("📚 Loading medical database..."):
+            documents = load_documents()
     
     # Sidebar
     with st.sidebar:
@@ -234,7 +161,13 @@ def main():
         st.markdown("Medical AI Assistant using Groq's Llama 3.1")
         
         if documents:
-            st.markdown(f"**Documents:** {len(documents)}")
+            st.markdown(f"**Documents Loaded:** {len(documents)}")
+            st.success("✅ Medical database active")
+        elif vectorstore_exists:
+            st.info("📚 Vectorstore found, processing...")
+        else:
+            st.warning("⚠️ No medical database loaded")
+            st.markdown("**The app will answer from general knowledge only.**")
         
         st.markdown("### ⚠️ Disclaimer")
         st.markdown("For informational purposes only. Consult healthcare professionals.")
@@ -258,12 +191,14 @@ def main():
                 if documents:
                     relevant = get_relevant_docs(documents, prompt, k=3)
                     if relevant:
-                        context = "\n\n".join([extract_doc_text(d) for d in relevant])
+                        context = "\n\n".join([extract_text(d) for d in relevant])
                         
                         with st.expander("📚 Sources"):
                             for i, doc in enumerate(relevant, 1):
-                                meta = extract_doc_metadata(doc)
-                                st.markdown(f"**{i}.** {meta.get('source', 'Unknown')}")
+                                source = doc.metadata.get('source', 'Unknown') if hasattr(doc, 'metadata') else 'Unknown'
+                                st.markdown(f"**{i}.** {source}")
+                                st.caption(extract_text(doc)[:150] + "...")
+                                st.divider()
                 
                 response = get_groq_response(prompt, context)
                 if response:
