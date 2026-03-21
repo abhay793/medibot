@@ -1,0 +1,16 @@
+Total documents: 5072
+
+=== First 3 Documents Preview ===
+
+Document 1:
+Source: data/The_GALE_ENCYCLOPEDIA_of_MEDICINE_SECOND.pdf
+Content: The GALE ENCYCLOPEDIA of MEDICINE SECOND EDITION...
+
+Document 2:
+Source: data/The_GALE_ENCYCLOPEDIA_of_MEDICINE_SECOND.pdf
+Content: The GALE ENCYCLOPEDIA of MEDICINE SECOND EDITION JACQUELINE L. LONGE, EDITOR DEIRDRE S. BLANCHFIELD, ASSOCIATE EDITOR VOLUME C-F 2...
+
+Document 3:
+Source: data/The_GALE_ENCYCLOPEDIA_of_MEDICINE_SECOND.pdf
+Content: STAFF Jacqueline L. Longe, Project Editor Deirdre S. Blanchfield, Associate Editor Christine B. Jeryan, Managing Editor Donna Olendorf, Senior Editor Stacey Blachford, Associate Editor Kate Kretschmann, Melissa C. McDade, Ryan Thomason, Assistant Editors Mark Springer, Technical Specialist Andrea Lo...
+
