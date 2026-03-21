@@ -1,80 +1,102 @@
 import os
 import streamlit as st
 import pickle
-import faiss
-import numpy as np
 from groq import Groq
 
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
 # =========================
-# SIMPLE DOCUMENT CLASS
-# =========================
-
-class Document:
-    def __init__(self, page_content, metadata=None):
-        self.page_content = page_content
-        self.metadata = metadata or {}
-
-# =========================
-# LOAD FAISS INDEX AND DOCUMENTS
+# LOAD DOCUMENTS FROM VECTORSTORE
 # =========================
 
 @st.cache_resource
-def load_faiss_index():
-    """Load FAISS index and documents without any ML libraries"""
+def load_documents():
+    """Load documents from vectorstore without FAISS index"""
     try:
-        # Load FAISS index
-        index_path = f"{DB_FAISS_PATH}/index.faiss"
-        index = faiss.read_index(index_path)
-        
-        # Load documents
-        documents = []
-        
-        # Try to load from documents.pkl
+        # Try to load documents.pkl first
         docs_path = f"{DB_FAISS_PATH}/documents.pkl"
-        if os.path.exists(docs_path):
-            with open(docs_path, "rb") as f:
-                documents = pickle.load(f)
-        else:
-            # Try to load from index.pkl
+        
+        if not os.path.exists(docs_path):
+            st.warning(f"No documents.pkl found at {docs_path}")
+            
+            # Try to load from index.pkl as fallback
             index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
             if os.path.exists(index_pkl_path):
                 with open(index_pkl_path, "rb") as f:
                     data = pickle.load(f)
-                    documents = data.get("documents", [])
+                    if isinstance(data, dict):
+                        documents = data.get('documents', data.get('chunks', []))
+                        if documents:
+                            st.info(f"Loaded {len(documents)} documents from index.pkl")
+                            return documents
+            return []
         
-        if not documents:
-            st.warning("No documents found. Using keyword-based search without document retrieval.")
-        
-        return {"index": index, "documents": documents}
+        # Load documents.pkl
+        with open(docs_path, "rb") as f:
+            data = pickle.load(f)
+            
+            # Handle different data structures
+            if isinstance(data, list):
+                documents = data
+                st.info(f"✅ Loaded {len(documents)} documents from documents.pkl")
+                return documents
+            elif isinstance(data, dict):
+                documents = data.get('documents', data.get('chunks', []))
+                if documents:
+                    st.info(f"✅ Loaded {len(documents)} documents from documents.pkl")
+                    return documents
+            elif isinstance(data, tuple):
+                # Try to extract documents from tuple
+                documents = []
+                for item in data:
+                    if hasattr(item, 'page_content'):
+                        documents.append(item)
+                if documents:
+                    st.info(f"✅ Loaded {len(documents)} documents from tuple structure")
+                    return documents
+            else:
+                st.warning(f"Unknown data type: {type(data)}")
+                return []
+                
     except Exception as e:
-        st.error(f"Error loading FAISS index: {e}")
-        return None
+        st.error(f"Error loading documents: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return []
 
 # =========================
 # SIMPLE KEYWORD RETRIEVAL
 # =========================
 
-def get_relevant_docs(faiss_data, query, k=3):
+def get_relevant_docs(documents, query, k=3):
     """Get relevant documents using simple keyword matching"""
-    if not faiss_data or not faiss_data["documents"]:
+    if not documents:
         return []
     
-    # Stopwords to filter
+    # Stopwords to filter out common words
     stopwords = {"what", "is", "the", "how", "a", "an", "of", "to", "in", "on", 
-                 "for", "with", "by", "at", "from", "as", "are", "was", "were", "be"}
+                 "for", "with", "by", "at", "from", "as", "are", "was", "were", "be",
+                 "this", "that", "these", "those", "it", "they", "we", "you", "i"}
     
     # Extract keywords from query
     query_words = [w.lower() for w in query.split() if w.lower() not in stopwords and len(w) > 2]
     
     if not query_words:
-        return []
+        # If no meaningful keywords, return first k documents
+        return documents[:k]
     
     # Score documents based on keyword matches
     scored_docs = []
-    for doc in faiss_data["documents"]:
-        doc_text = doc.page_content.lower()
+    for doc in documents:
+        # Extract text from document
+        if hasattr(doc, 'page_content'):
+            doc_text = doc.page_content.lower()
+        elif isinstance(doc, dict):
+            doc_text = doc.get('page_content', '').lower()
+        else:
+            continue
+        
+        # Calculate score
         score = sum(1 for word in query_words if word in doc_text)
         if score > 0:
             scored_docs.append((doc, score))
@@ -82,6 +104,28 @@ def get_relevant_docs(faiss_data, query, k=3):
     # Sort by score and return top k
     scored_docs.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in scored_docs[:k]]
+
+# =========================
+# EXTRACT DOCUMENT TEXT
+# =========================
+
+def extract_doc_text(doc):
+    """Extract text from document object"""
+    if hasattr(doc, 'page_content'):
+        return doc.page_content
+    elif isinstance(doc, dict):
+        return doc.get('page_content', '')
+    else:
+        return str(doc)
+
+def extract_doc_metadata(doc):
+    """Extract metadata from document object"""
+    if hasattr(doc, 'metadata'):
+        return doc.metadata
+    elif isinstance(doc, dict):
+        return doc.get('metadata', {})
+    else:
+        return {}
 
 # =========================
 # GROQ API CALL
@@ -116,8 +160,7 @@ CONTEXT:
 QUESTION:
 {prompt}
 
-ANSWER:
-"""
+ANSWER:"""
     else:
         full_prompt = f"""You are a medical assistant. Answer the following question:
 {prompt}"""
@@ -143,16 +186,18 @@ ANSWER:
 # =========================
 
 def main():
+    # Page configuration
     st.set_page_config(
-        page_title="Health AI Assistant",
+        page_title="Health AI Medical Assistant",
         page_icon="🏥",
         layout="wide"
     )
     
+    # Title
     st.title("🏥 Health AI Medical Assistant")
-    st.caption("Your AI-powered medical information assistant")
+    st.caption("Your AI-powered medical information assistant based on trusted medical documents")
     
-    # Check if API key is set
+    # Check API key first
     if not st.secrets.get("GROQ_API_KEY", ""):
         st.error("""
         ### ⚠️ GROQ_API_KEY not configured!
@@ -166,12 +211,47 @@ def main():
         """)
         st.stop()
     
-    # Load FAISS data
+    # Load documents
     with st.spinner("📚 Loading medical database..."):
-        faiss_data = load_faiss_index()
+        documents = load_documents()
     
-    if faiss_data is None:
-        st.warning("⚠️ Medical database not loaded. The app will work without document retrieval.")
+    # Sidebar with information
+    with st.sidebar:
+        st.markdown("### ℹ️ About")
+        st.markdown("""
+        This AI assistant provides information based on:
+        - Medical documents in the database
+        - Keyword-based document retrieval
+        - Groq's Llama 3.1 model for answers
+        """)
+        
+        if documents:
+            st.markdown(f"### 📊 Database Stats")
+            st.markdown(f"- **Total documents:** {len(documents)}")
+            st.markdown(f"- **Status:** ✅ Active")
+            
+            # Show document sources
+            sources = set()
+            for doc in documents:
+                metadata = extract_doc_metadata(doc)
+                source = metadata.get('source', 'Unknown')
+                if source != 'Unknown':
+                    sources.add(source.split('/')[-1])
+            
+            if sources:
+                st.markdown("### 📄 Documents")
+                for source in list(sources)[:5]:
+                    st.markdown(f"- {source}")
+        else:
+            st.markdown("### ⚠️ Status")
+            st.markdown("⚠️ No documents loaded")
+            st.markdown("The app will work without document retrieval")
+        
+        st.markdown("### ⚠️ Disclaimer")
+        st.markdown("""
+        This is an AI assistant for informational purposes only.
+        Always consult qualified healthcare professionals for medical advice.
+        """)
     
     # Initialize chat history
     if "messages" not in st.session_state:
@@ -192,21 +272,37 @@ def main():
         # Generate response
         with st.chat_message("assistant"):
             with st.spinner("🤔 Searching medical database and formulating answer..."):
-                # Get relevant documents if available
                 context = None
                 relevant_docs = []
                 
-                if faiss_data and faiss_data["documents"]:
-                    relevant_docs = get_relevant_docs(faiss_data, prompt, k=3)
+                # Get relevant documents if available
+                if documents:
+                    relevant_docs = get_relevant_docs(documents, prompt, k=3)
                     if relevant_docs:
-                        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+                        # Build context from relevant documents
+                        contexts = []
+                        for doc in relevant_docs:
+                            doc_text = extract_doc_text(doc)
+                            if doc_text:
+                                contexts.append(doc_text)
+                        context = "\n\n".join(contexts)
                         
                         # Show sources in expander
                         with st.expander("📚 Retrieved from medical documents"):
                             for i, doc in enumerate(relevant_docs, 1):
-                                source = doc.metadata.get('source', 'Unknown')
+                                metadata = extract_doc_metadata(doc)
+                                source = metadata.get('source', 'Unknown')
+                                chunk_id = metadata.get('chunk_id', '')
+                                
                                 st.markdown(f"**Source {i}:** `{source}`")
-                                st.markdown(f"{doc.page_content[:300]}...")
+                                if chunk_id:
+                                    st.markdown(f"**Chunk ID:** {chunk_id}")
+                                
+                                doc_text = extract_doc_text(doc)
+                                if len(doc_text) > 300:
+                                    st.markdown(f"{doc_text[:300]}...")
+                                else:
+                                    st.markdown(doc_text)
                                 st.divider()
                 
                 # Get response from Groq
@@ -220,25 +316,9 @@ def main():
                     st.error(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
     
-    # Sidebar with info
-    with st.sidebar:
-        st.markdown("### ℹ️ About")
-        st.markdown("""
-        This AI assistant provides information based on:
-        - Medical documents in the database
-        - Keyword-based document retrieval
-        - Groq's Llama 3.1 model for answers
-        """)
-        
-        if faiss_data and faiss_data["documents"]:
-            st.markdown(f"### 📊 Database Stats")
-            st.markdown(f"- **Total documents:** {len(faiss_data['documents'])}")
-        
-        st.markdown("### ⚠️ Disclaimer")
-        st.markdown("""
-        This is an AI assistant for informational purposes only.
-        Always consult qualified healthcare professionals for medical advice.
-        """)
+    # Footer
+    st.markdown("---")
+    st.caption("💡 Tip: Ask specific questions about medical topics. The assistant will search through the loaded medical documents to find relevant information.")
 
 if __name__ == "__main__":
     main()
