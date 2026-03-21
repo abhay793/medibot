@@ -8,9 +8,7 @@ from langchain_community.vectorstores import FAISS
 DATA_PATH = "data/"
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
-# ================m=========
 # LOAD PDFs
-# =========================
 
 def load_pdf_files(data_path):
     loader = DirectoryLoader(
@@ -27,9 +25,7 @@ def load_pdf_files(data_path):
     print(f"Loaded {len(documents)} pages")
     return documents
 
-# =========================
 # CLEAN TEXT
-# =========================
 
 def clean_text(documents):
     for doc in documents:
@@ -39,9 +35,8 @@ def clean_text(documents):
         doc.page_content = text
     return documents
 
-# =========================
+
 # CHUNKING
-# =========================
 
 def create_chunks(documents):
     splitter = RecursiveCharacterTextSplitter(
@@ -59,27 +54,21 @@ def create_chunks(documents):
     print(f"Created {len(chunks)} chunks")
     return chunks
 
-# =========================
-# EMBEDDINGS (CONSISTENT)
-# =========================
+# EMBEDDINGS 
 
 def get_embedding_model():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-# =========================
 # SAVE FAISS
-# =========================
 
 def create_faiss_db(chunks, embedding_model):
     db = FAISS.from_documents(chunks, embedding_model)
     db.save_local(DB_FAISS_PATH)
     print("FAISS DB created!")
 
-# =========================
 # MAIN
-# =========================
 
 if __name__ == "__main__":
     docs = load_pdf_files(DATA_PATH)

@@ -5,9 +5,7 @@ from groq import Groq
 
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
-# =========================
 # LOAD DOCUMENTS FROM VECTORSTORE
-# =========================
 
 @st.cache_resource
 def load_documents():
@@ -40,9 +38,7 @@ def load_documents():
         st.error(f"Error loading documents: {e}")
         return []
 
-# =========================
 # CHECK VECTORSTORE
-# =========================
 
 def check_vectorstore():
     """Check if vectorstore exists"""
@@ -58,9 +54,7 @@ def check_vectorstore():
     
     return True
 
-# =========================
 # SIMPLE KEYWORD RETRIEVAL
-# =========================
 
 def get_relevant_docs(documents, query, k=3):
     """Get relevant documents using keyword matching"""
@@ -105,9 +99,7 @@ def extract_doc_metadata(doc):
         return doc.get('metadata', {})
     return {}
 
-# =========================
 # GROQ API CALL
-# =========================
 
 def get_groq_response(prompt, context=None):
     api_key = st.secrets.get("GROQ_API_KEY", "")
@@ -141,12 +133,11 @@ ANSWER:"""
     except Exception as e:
         return f"Error: {e}"
 
-# =========================
+
 # MAIN APP
-# =========================
 
 def main():
-    st.set_page_config(page_title="Health AI Medical Assistant", page_icon="🏥")
+    st.set_page_config(page_title="Your Medical Assistant", page_icon="🏥")
     
     # Custom CSS to hide the expander if needed
     st.markdown("""
@@ -172,7 +163,7 @@ def main():
         with st.spinner("📚 Loading medical database..."):
             documents = load_documents()
     
-    # Sidebar (cleaned version)
+    # Sidebar 
     with st.sidebar:
         st.markdown("### ℹ️ About")
         st.markdown("Medical AI Assistant using Groq's Llama 3.1")

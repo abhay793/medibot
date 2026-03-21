@@ -8,9 +8,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
-# =========================
 # LLM
-# =========================
 
 def load_llm():
     return ChatGroq(
@@ -19,9 +17,7 @@ def load_llm():
         temperature=0.3
     )
 
-# =========================
 # VECTOR STORE
-# =========================
 
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -35,9 +31,7 @@ db = FAISS.load_local(
 
 retriever = db.as_retriever(search_kwargs={"k": 5})
 
-# =========================
 # FILTER
-# =========================
 
 def filter_docs(query, docs):
     stopwords = {"what", "is", "the", "how", "a", "an", "of", "to"}
@@ -56,9 +50,7 @@ def filter_docs(query, docs):
     scored.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in scored[:3]]
 
-# =========================
 # LOOP
-# =========================
 
 while True:
     query = input("\nAsk (or exit): ")
