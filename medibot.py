@@ -20,10 +20,8 @@ def load_documents():
             with open(docs_path, "rb") as f:
                 data = pickle.load(f)
                 if isinstance(data, list):
-                    st.success(f"✅ Loaded {len(data)} medical documents")
                     return data
                 elif isinstance(data, dict) and 'documents' in data:
-                    st.success(f"✅ Loaded {len(data['documents'])} medical documents")
                     return data['documents']
         
         # If no documents.pkl, try to load from index.pkl
@@ -34,12 +32,7 @@ def load_documents():
                 if isinstance(data, dict):
                     for key in ['documents', 'chunks', 'docs']:
                         if key in data and data[key]:
-                            st.success(f"✅ Loaded {len(data[key])} documents")
                             return data[key]
-        
-        # If vectorstore exists but no documents
-        if os.path.exists(f"{DB_FAISS_PATH}/index.faiss"):
-            st.info("📚 Vectorstore found. Please run extract_real_document.py to create documents.pkl")
         
         return []
                 
@@ -59,12 +52,7 @@ def check_vectorstore():
         st.warning("""
         ### 📚 Medical Database Not Found
         
-        **To add medical documents:**
-        1. Make sure you have PDF files in the `data` folder
-        2. Run `python create_memory_for_llm.py` locally
-        3. Push the `vectorstore` folder to GitHub
-        
-        The app will work with general knowledge until then.
+        Please add PDF files to the `data` folder and push to GitHub.
         """)
         return False
     
@@ -159,6 +147,15 @@ ANSWER:"""
 
 def main():
     st.set_page_config(page_title="Health AI Medical Assistant", page_icon="🏥")
+    
+    # Custom CSS to hide the expander if needed
+    st.markdown("""
+    <style>
+    /* Optional: Hide the expander if you want to completely remove it */
+    /* .stExpander { display: none; } */
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.title("🏥 Health AI Medical Assistant")
     
     # Check API key
@@ -175,31 +172,14 @@ def main():
         with st.spinner("📚 Loading medical database..."):
             documents = load_documents()
     
-    # Sidebar
+    # Sidebar (cleaned version)
     with st.sidebar:
         st.markdown("### ℹ️ About")
         st.markdown("Medical AI Assistant using Groq's Llama 3.1")
         
         if documents:
-            st.markdown(f"**📊 Documents Loaded:** {len(documents)}")
+            # Only show a simple success message without the count
             st.success("✅ Medical database active")
-            
-            # Show some document info
-            sources = set()
-            for doc in documents[:10]:
-                meta = extract_doc_metadata(doc)
-                source = meta.get('source', 'Unknown')
-                sources.add(source.split('/')[-1])
-            
-            if sources:
-                with st.expander("📄 Document Sources"):
-                    for src in list(sources)[:5]:
-                        st.markdown(f"- {src}")
-        elif vectorstore_exists:
-            st.info("📚 Vectorstore found, processing...")
-        else:
-            st.info("💡 **No medical database**")
-            st.markdown("Add PDFs to the `data` folder and push to GitHub")
         
         st.markdown("### ⚠️ Disclaimer")
         st.markdown("For informational purposes only. Consult healthcare professionals.")
@@ -224,14 +204,6 @@ def main():
                     relevant = get_relevant_docs(documents, prompt, k=3)
                     if relevant:
                         context = "\n\n".join([extract_doc_text(d) for d in relevant])
-                        
-                        with st.expander("📚 Retrieved from medical documents"):
-                            for i, doc in enumerate(relevant, 1):
-                                meta = extract_doc_metadata(doc)
-                                source = meta.get('source', 'Unknown')
-                                st.markdown(f"**Source {i}:** `{source}`")
-                                st.caption(extract_doc_text(doc)[:200] + "...")
-                                st.divider()
                 
                 response = get_groq_response(prompt, context)
                 if response:
