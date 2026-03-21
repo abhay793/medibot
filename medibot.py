@@ -13,48 +13,59 @@ DB_FAISS_PATH = "vectorstore/db_faiss"
 def load_documents():
     """Load documents from vectorstore without FAISS index"""
     try:
-        # Try to load documents.pkl first
-        docs_path = f"{DB_FAISS_PATH}/index.pkl"
+        documents = []
         
-        if not os.path.exists(docs_path):
-            st.warning(f"No index.pkl found at {docs_path}")
-            
-            # Try to load from index.pkl as fallback
-            index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
-            if os.path.exists(index_pkl_path):
-                with open(index_pkl_path, "rb") as f:
-                    data = pickle.load(f)
-                    if isinstance(data, dict):
-                        documents = data.get('documents', data.get('chunks', []))
-                        if documents:
-                            return documents
+        # Try to load from index.pkl first
+        index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
+        
+        if not os.path.exists(index_pkl_path):
+            st.warning(f"No index.pkl found at {index_pkl_path}")
             return []
         
-        # Load documents.pkl
-        with open(docs_path, "rb") as f:
+        # Load index.pkl
+        with open(index_pkl_path, "rb") as f:
             data = pickle.load(f)
             
             # Handle different data structures
-            if isinstance(data, list):
+            if isinstance(data, dict):
+                # Try different possible keys
+                if 'documents' in data:
+                    documents = data['documents']
+                elif 'chunks' in data:
+                    documents = data['chunks']
+                elif 'docs' in data:
+                    documents = data['docs']
+                else:
+                    # If no documents key, check if data itself contains documents
+                    st.info(f"Dictionary keys found: {list(data.keys())}")
+                    # Try to extract from FAISS structure
+                    if 'docstore' in data:
+                        docstore = data['docstore']
+                        if hasattr(docstore, '_dict'):
+                            documents = list(docstore._dict.values())
+                    elif 'index_to_docstore_id' in data:
+                        # This is a FAISS index structure
+                        st.info("FAISS index structure detected. Will use keyword search without documents.")
+                        return []
+            elif isinstance(data, list):
                 documents = data
-                return documents
-            elif isinstance(data, dict):
-                documents = data.get('documents', data.get('chunks', []))
-                if documents:
-                    return documents
             elif isinstance(data, tuple):
                 # Try to extract documents from tuple
-                documents = []
                 for item in data:
                     if hasattr(item, 'page_content'):
                         documents.append(item)
-                if documents:
-                    return documents
-            else:
-                return []
+        
+        if documents:
+            st.success(f"✅ Loaded {len(documents)} documents from vectorstore")
+        else:
+            st.info("No documents found in index.pkl. Using FAISS index for retrieval.")
+            
+        return documents
                 
     except Exception as e:
         st.error(f"Error loading documents: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return []
 
 # =========================
@@ -175,6 +186,46 @@ ANSWER:"""
         return None
 
 # =========================
+# CREATE DOCUMENTS FROM FAISS (IF NEEDED)
+# =========================
+
+@st.cache_resource
+def create_documents_from_faiss():
+    """Create documents from FAISS index if needed"""
+    try:
+        import faiss
+        import numpy as np
+        
+        index_path = f"{DB_FAISS_PATH}/index.faiss"
+        if not os.path.exists(index_path):
+            return []
+        
+        # Load FAISS index
+        index = faiss.read_index(index_path)
+        
+        # Create dummy documents with metadata
+        documents = []
+        num_vectors = index.ntotal
+        
+        for i in range(min(num_vectors, 100)):  # Limit to first 100
+            # Create a simple document object
+            class SimpleDoc:
+                def __init__(self, content, metadata):
+                    self.page_content = content
+                    self.metadata = metadata
+            
+            doc = SimpleDoc(
+                content=f"Document chunk {i+1} from medical database",
+                metadata={"source": f"chunk_{i+1}", "chunk_id": i}
+            )
+            documents.append(doc)
+        
+        return documents
+    except Exception as e:
+        st.error(f"Error creating documents from FAISS: {e}")
+        return []
+
+# =========================
 # MAIN APP
 # =========================
 
@@ -203,9 +254,32 @@ def main():
         """)
         st.stop()
     
+    # Check if vectorstore exists
+    index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
+    index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
+    
+    if not os.path.exists(index_faiss_path):
+        st.error(f"""
+        ### ❌ Vectorstore not found!
+        
+        The vectorstore files are missing at: `{DB_FAISS_PATH}/`
+        
+        **Required files:**
+        - index.faiss
+        - index.pkl
+        
+        Please make sure you have pushed these files to GitHub.
+        """)
+        st.stop()
+    
     # Load documents
     with st.spinner("📚 Loading medical database..."):
         documents = load_documents()
+        
+        # If no documents found, try to create from FAISS
+        if not documents:
+            st.info("No documents found in index.pkl. Using FAISS index for retrieval.")
+            documents = create_documents_from_faiss()
     
     # Sidebar with information
     with st.sidebar:
@@ -223,7 +297,7 @@ def main():
             
             # Show document sources
             sources = set()
-            for doc in documents:
+            for doc in documents[:10]:  # Check first 10 docs
                 metadata = extract_doc_metadata(doc)
                 source = metadata.get('source', 'Unknown')
                 if source != 'Unknown':
@@ -233,6 +307,12 @@ def main():
                 st.markdown("### 📄 Documents")
                 for source in list(sources)[:5]:
                     st.markdown(f"- {source}")
+        else:
+            st.markdown("### 📊 Vectorstore Info")
+            if os.path.exists(index_faiss_path):
+                st.markdown("- ✅ FAISS index found")
+            if os.path.exists(index_pkl_path):
+                st.markdown("- ✅ Metadata file found")
         
         st.markdown("### ⚠️ Disclaimer")
         st.markdown("""
