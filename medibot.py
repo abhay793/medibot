@@ -11,61 +11,92 @@ DB_FAISS_PATH = "vectorstore/db_faiss"
 
 @st.cache_resource
 def load_documents():
-    """Load documents from vectorstore without FAISS index"""
+    """Load documents from vectorstore"""
     try:
-        documents = []
+        # First try to load documents.pkl
+        docs_path = f"{DB_FAISS_PATH}/documents.pkl"
         
-        # Try to load from index.pkl first
+        if os.path.exists(docs_path):
+            with open(docs_path, "rb") as f:
+                data = pickle.load(f)
+                if isinstance(data, list):
+                    st.success(f"✅ Loaded {len(data)} documents from documents.pkl")
+                    return data
+                elif isinstance(data, dict) and 'documents' in data:
+                    st.success(f"✅ Loaded {len(data['documents'])} documents from documents.pkl")
+                    return data['documents']
+        
+        # If no documents.pkl, try to load from index.pkl
         index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
+        if os.path.exists(index_pkl_path):
+            with open(index_pkl_path, "rb") as f:
+                data = pickle.load(f)
+                
+                # Check if it contains documents
+                if isinstance(data, dict):
+                    # Try different keys
+                    for key in ['documents', 'chunks', 'docs', 'texts']:
+                        if key in data and data[key]:
+                            st.success(f"✅ Loaded {len(data[key])} documents from index.pkl ({key})")
+                            return data[key]
+                    
+                    # Check if it's a FAISS docstore
+                    if 'docstore' in data and hasattr(data['docstore'], '_dict'):
+                        docs = list(data['docstore']._dict.values())
+                        if docs:
+                            st.success(f"✅ Loaded {len(docs)} documents from FAISS docstore")
+                            return docs
         
-        if not os.path.exists(index_pkl_path):
-            st.warning(f"No index.pkl found at {index_pkl_path}")
-            return []
-        
-        # Load index.pkl
-        with open(index_pkl_path, "rb") as f:
-            data = pickle.load(f)
+        # If still no documents, check if FAISS index exists
+        index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
+        if os.path.exists(index_faiss_path):
+            st.info("FAISS index found but no documents. The app will work with limited functionality.")
             
-            # Handle different data structures
-            if isinstance(data, dict):
-                # Try different possible keys
-                if 'documents' in data:
-                    documents = data['documents']
-                elif 'chunks' in data:
-                    documents = data['chunks']
-                elif 'docs' in data:
-                    documents = data['docs']
-                else:
-                    # If no documents key, check if data itself contains documents
-                    st.info(f"Dictionary keys found: {list(data.keys())}")
-                    # Try to extract from FAISS structure
-                    if 'docstore' in data:
-                        docstore = data['docstore']
-                        if hasattr(docstore, '_dict'):
-                            documents = list(docstore._dict.values())
-                    elif 'index_to_docstore_id' in data:
-                        # This is a FAISS index structure
-                        st.info("FAISS index structure detected. Will use keyword search without documents.")
-                        return []
-            elif isinstance(data, list):
-                documents = data
-            elif isinstance(data, tuple):
-                # Try to extract documents from tuple
-                for item in data:
-                    if hasattr(item, 'page_content'):
-                        documents.append(item)
-        
-        if documents:
-            st.success(f"✅ Loaded {len(documents)} documents from vectorstore")
-        else:
-            st.info("No documents found in index.pkl. Using FAISS index for retrieval.")
-            
-        return documents
+        return []
                 
     except Exception as e:
         st.error(f"Error loading documents: {e}")
-        import traceback
-        st.error(traceback.format_exc())
+        return []
+
+# =========================
+# CREATE SIMPLE DOCUMENTS FROM FAISS
+# =========================
+
+@st.cache_resource
+def create_simple_documents():
+    """Create simple documents if none found"""
+    try:
+        import faiss
+        
+        index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
+        if not os.path.exists(index_faiss_path):
+            return []
+        
+        # Load FAISS index to get number of vectors
+        index = faiss.read_index(index_faiss_path)
+        num_vectors = index.ntotal
+        
+        # Create simple document objects
+        documents = []
+        
+        class SimpleDocument:
+            def __init__(self, content, metadata):
+                self.page_content = content
+                self.metadata = metadata
+        
+        for i in range(min(num_vectors, 100)):
+            doc = SimpleDocument(
+                content=f"Medical document chunk {i+1} from the database",
+                metadata={"source": f"chunk_{i+1}", "chunk_id": i}
+            )
+            documents.append(doc)
+        
+        if documents:
+            st.info(f"Created {len(documents)} placeholder documents from FAISS index")
+        
+        return documents
+    except Exception as e:
+        st.error(f"Error creating documents: {e}")
         return []
 
 # =========================
@@ -86,7 +117,6 @@ def get_relevant_docs(documents, query, k=3):
     query_words = [w.lower() for w in query.split() if w.lower() not in stopwords and len(w) > 2]
     
     if not query_words:
-        # If no meaningful keywords, return first k documents
         return documents[:k]
     
     # Score documents based on keyword matches
@@ -138,25 +168,15 @@ def extract_doc_metadata(doc):
 def get_groq_response(prompt, context=None):
     """Call Groq API directly"""
     
-    # Get API key from secrets
     api_key = st.secrets.get("GROQ_API_KEY", "")
     if not api_key:
         st.error("GROQ_API_KEY not found in secrets!")
         return None
     
-    # Initialize Groq client
     client = Groq(api_key=api_key)
     
-    # Build the prompt
     if context:
         full_prompt = f"""You are a medical assistant. Answer ONLY from the context provided below.
-
-IMPORTANT RULES:
-- Answer based ONLY on the given context
-- Use bullet points for clarity
-- Be specific and concise
-- Do NOT guess or add information outside the context
-- If the answer is not in the context, say: "The context provides limited information about this topic."
 
 CONTEXT:
 {context}
@@ -166,222 +186,89 @@ QUESTION:
 
 ANSWER:"""
     else:
-        full_prompt = f"""You are a medical assistant. Answer the following question:
-{prompt}"""
+        full_prompt = f"""You are a medical assistant. Answer: {prompt}"""
     
     try:
-        # Make API call
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "user", "content": full_prompt}
-            ],
+            messages=[{"role": "user", "content": full_prompt}],
             temperature=0.3,
             max_tokens=1024
         )
-        
         return completion.choices[0].message.content
     except Exception as e:
-        st.error(f"Error calling Groq API: {e}")
+        st.error(f"Error: {e}")
         return None
-
-# =========================
-# CREATE DOCUMENTS FROM FAISS (IF NEEDED)
-# =========================
-
-@st.cache_resource
-def create_documents_from_faiss():
-    """Create documents from FAISS index if needed"""
-    try:
-        import faiss
-        import numpy as np
-        
-        index_path = f"{DB_FAISS_PATH}/index.faiss"
-        if not os.path.exists(index_path):
-            return []
-        
-        # Load FAISS index
-        index = faiss.read_index(index_path)
-        
-        # Create dummy documents with metadata
-        documents = []
-        num_vectors = index.ntotal
-        
-        for i in range(min(num_vectors, 100)):  # Limit to first 100
-            # Create a simple document object
-            class SimpleDoc:
-                def __init__(self, content, metadata):
-                    self.page_content = content
-                    self.metadata = metadata
-            
-            doc = SimpleDoc(
-                content=f"Document chunk {i+1} from medical database",
-                metadata={"source": f"chunk_{i+1}", "chunk_id": i}
-            )
-            documents.append(doc)
-        
-        return documents
-    except Exception as e:
-        st.error(f"Error creating documents from FAISS: {e}")
-        return []
 
 # =========================
 # MAIN APP
 # =========================
 
 def main():
-    # Page configuration
-    st.set_page_config(
-        page_title="Health AI Medical Assistant",
-        page_icon="🏥",
-        layout="wide"
-    )
-    
-    # Title
+    st.set_page_config(page_title="Health AI Medical Assistant", page_icon="🏥", layout="wide")
     st.title("🏥 Health AI Medical Assistant")
     
-    # Check API key first
+    # Check API key
     if not st.secrets.get("GROQ_API_KEY", ""):
-        st.error("""
-        ### ⚠️ GROQ_API_KEY not configured!
-        
-        Please add your Groq API key to continue:
-        1. Click on **"Manage app"** in the bottom right
-        2. Go to **"Secrets"**
-        3. Add: `GROQ_API_KEY = "your_api_key_here"`
-        
-        [Get a Groq API key](https://console.groq.com/keys)
-        """)
+        st.error("⚠️ GROQ_API_KEY not configured! Add it in Secrets.")
         st.stop()
     
-    # Check if vectorstore exists
+    # Check vectorstore files
     index_faiss_path = f"{DB_FAISS_PATH}/index.faiss"
     index_pkl_path = f"{DB_FAISS_PATH}/index.pkl"
     
     if not os.path.exists(index_faiss_path):
-        st.error(f"""
-        ### ❌ Vectorstore not found!
-        
-        The vectorstore files are missing at: `{DB_FAISS_PATH}/`
-        
-        **Required files:**
-        - index.faiss
-        - index.pkl
-        
-        Please make sure you have pushed these files to GitHub.
-        """)
+        st.error(f"❌ Vectorstore not found at {DB_FAISS_PATH}/")
         st.stop()
     
     # Load documents
     with st.spinner("📚 Loading medical database..."):
         documents = load_documents()
         
-        # If no documents found, try to create from FAISS
         if not documents:
-            st.info("No documents found in index.pkl. Using FAISS index for retrieval.")
-            documents = create_documents_from_faiss()
+            documents = create_simple_documents()
     
-    # Sidebar with information
+    # Sidebar
     with st.sidebar:
         st.markdown("### ℹ️ About")
-        st.markdown("""
-        This AI assistant provides information based on:
-        - Medical documents in the database
-        - Keyword-based document retrieval
-        - Groq's Llama 3.1 model for answers
-        """)
+        st.markdown("Medical AI Assistant using Groq's Llama 3.1")
         
         if documents:
-            st.markdown(f"### 📊 Database Stats")
-            st.markdown(f"- **Documents loaded:** {len(documents)}")
-            
-            # Show document sources
-            sources = set()
-            for doc in documents[:10]:  # Check first 10 docs
-                metadata = extract_doc_metadata(doc)
-                source = metadata.get('source', 'Unknown')
-                if source != 'Unknown':
-                    sources.add(source.split('/')[-1])
-            
-            if sources:
-                st.markdown("### 📄 Documents")
-                for source in list(sources)[:5]:
-                    st.markdown(f"- {source}")
-        else:
-            st.markdown("### 📊 Vectorstore Info")
-            if os.path.exists(index_faiss_path):
-                st.markdown("- ✅ FAISS index found")
-            if os.path.exists(index_pkl_path):
-                st.markdown("- ✅ Metadata file found")
+            st.markdown(f"**Documents:** {len(documents)}")
         
         st.markdown("### ⚠️ Disclaimer")
-        st.markdown("""
-        This is an AI assistant for informational purposes only.
-        Always consult qualified healthcare professionals for medical advice.
-        """)
+        st.markdown("For informational purposes only. Consult healthcare professionals.")
     
-    # Initialize chat history
+    # Chat interface
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
-    # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
-    # Chat input
-    if prompt := st.chat_input("Ask me about medical information..."):
-        # Add user message
+    if prompt := st.chat_input("Ask about medical information..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Generate response
         with st.chat_message("assistant"):
-            with st.spinner("🤔 Searching medical database and formulating answer..."):
+            with st.spinner("Thinking..."):
                 context = None
-                relevant_docs = []
-                
-                # Get relevant documents if available
                 if documents:
-                    relevant_docs = get_relevant_docs(documents, prompt, k=3)
-                    if relevant_docs:
-                        # Build context from relevant documents
-                        contexts = []
-                        for doc in relevant_docs:
-                            doc_text = extract_doc_text(doc)
-                            if doc_text:
-                                contexts.append(doc_text)
-                        context = "\n\n".join(contexts)
+                    relevant = get_relevant_docs(documents, prompt, k=3)
+                    if relevant:
+                        context = "\n\n".join([extract_doc_text(d) for d in relevant])
                         
-                        # Show sources in expander
-                        with st.expander("📚 Retrieved from medical documents"):
-                            for i, doc in enumerate(relevant_docs, 1):
-                                metadata = extract_doc_metadata(doc)
-                                source = metadata.get('source', 'Unknown')
-                                chunk_id = metadata.get('chunk_id', '')
-                                
-                                st.markdown(f"**Source {i}:** `{source}`")
-                                if chunk_id:
-                                    st.markdown(f"**Chunk ID:** {chunk_id}")
-                                
-                                doc_text = extract_doc_text(doc)
-                                if len(doc_text) > 300:
-                                    st.markdown(f"{doc_text[:300]}...")
-                                else:
-                                    st.markdown(doc_text)
-                                st.divider()
+                        with st.expander("📚 Sources"):
+                            for i, doc in enumerate(relevant, 1):
+                                meta = extract_doc_metadata(doc)
+                                st.markdown(f"**{i}.** {meta.get('source', 'Unknown')}")
                 
-                # Get response from Groq
                 response = get_groq_response(prompt, context)
-                
                 if response:
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
-                else:
-                    error_msg = "Sorry, I couldn't process your request. Please check your API key and try again."
-                    st.error(error_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
 if __name__ == "__main__":
     main()
