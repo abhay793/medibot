@@ -1,43 +1,75 @@
 import os
-import sys
 import streamlit as st
-
-# === CRITICAL: Set environment variables BEFORE any imports ===
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-# Now import everything else
-from langchain_huggingface import HuggingFaceEmbeddings
+import requests
+import json
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
+from langchain.schema import Document
 
 DB_FAISS_PATH = "vectorstore/db_faiss"
 
 # =========================
-# LOAD DB
+# EMBEDDINGS USING API
+# =========================
+
+class HFAPIEmbeddings:
+    """Use HuggingFace Inference API for embeddings"""
+    
+    def __init__(self, api_token):
+        self.api_token = api_token
+        self.api_url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+        self.headers = {"Authorization": f"Bearer {self.api_token}"}
+    
+    def embed_documents(self, texts):
+        """Get embeddings for multiple texts"""
+        embeddings = []
+        for text in texts:
+            embedding = self.embed_query(text)
+            embeddings.append(embedding)
+        return embeddings
+    
+    def embed_query(self, text):
+        """Get embedding for a single query"""
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=self.headers,
+                json={"inputs": text, "options": {"wait_for_model": True}}
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"Embedding API error: {response.status_code}")
+                return [0.0] * 384  # Return zero vector as fallback
+        except Exception as e:
+            st.error(f"Error getting embeddings: {e}")
+            return [0.0] * 384
+
+# =========================
+# LOAD DB WITH API EMBEDDINGS
 # =========================
 
 @st.cache_resource
 def load_db():
     try:
-        # Use a simpler embedding configuration
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={
-                'device': 'cpu'
-            },
-            encode_kwargs={
-                'normalize_embeddings': True
-            }
-        )
+        # Get HuggingFace token from secrets
+        hf_token = st.secrets.get("HUGGINGFACEHUB_API_TOKEN", "")
         
-        # Load FAISS database
+        if not hf_token:
+            st.warning("HuggingFace token not found. Using fallback mode.")
+            return None
+        
+        # Create embeddings using API
+        embeddings = HFAPIEmbeddings(hf_token)
+        
+        # Load FAISS database (this will use the API for any needed embeddings)
         db = FAISS.load_local(
             DB_FAISS_PATH,
             embeddings,
             allow_dangerous_deserialization=True
         )
+        
         return db
     except Exception as e:
         st.error(f"Error loading database: {e}")
@@ -48,14 +80,11 @@ def load_db():
 # =========================
 
 def load_llm():
-    groq_api_key = os.environ.get("GROQ_API_KEY")
+    groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+    
     if not groq_api_key:
-        # Try to get from streamlit secrets
-        if hasattr(st, 'secrets') and "GROQ_API_KEY" in st.secrets:
-            groq_api_key = st.secrets["GROQ_API_KEY"]
-        else:
-            st.error("GROQ_API_KEY not found!")
-            return None
+        st.error("GROQ_API_KEY not found in secrets!")
+        return None
     
     return ChatGroq(
         groq_api_key=groq_api_key,
@@ -94,6 +123,14 @@ def filter_docs(query, docs):
 def main():
     st.title("🏥 Health AI Medical Assistant")
     
+    # Check if API keys are set
+    if not st.secrets.get("GROQ_API_KEY", ""):
+        st.error("Please set GROQ_API_KEY in Streamlit secrets!")
+        st.stop()
+    
+    if not st.secrets.get("HUGGINGFACEHUB_API_TOKEN", ""):
+        st.warning("HuggingFace API token not set. Some features may not work.")
+    
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -116,25 +153,36 @@ def main():
                 try:
                     # Load database
                     db = load_db()
+                    
                     if db is None:
-                        st.error("Database not available. Please check your vectorstore.")
-                        return
-                    
-                    # Retrieve relevant documents
-                    retriever = db.as_retriever(search_kwargs={"k": 5})
-                    docs = retriever.invoke(prompt)
-                    docs = filter_docs(prompt, docs)
-                    
-                    if not docs:
-                        response = "I couldn't find relevant information in the medical database."
-                    else:
-                        context = "\n\n".join([doc.page_content for doc in docs])
-                        
+                        # Fallback: use LLM without context
                         llm = load_llm()
-                        if llm is None:
-                            return
+                        if llm:
+                            response_obj = llm.invoke(f"""
+You are a medical assistant. Answer the following question:
+{prompt}
+""")
+                            response = response_obj.content
+                        else:
+                            response = "Database not available and LLM not configured."
+                    else:
+                        # Get retriever
+                        retriever = db.as_retriever(search_kwargs={"k": 5})
                         
-                        response_obj = llm.invoke(f"""
+                        # Get relevant documents
+                        docs = retriever.invoke(prompt)
+                        docs = filter_docs(prompt, docs)
+                        
+                        if not docs:
+                            response = "I couldn't find relevant information in the medical database."
+                        else:
+                            context = "\n\n".join([doc.page_content for doc in docs])
+                            
+                            llm = load_llm()
+                            if llm is None:
+                                response = "LLM not available."
+                            else:
+                                response_obj = llm.invoke(f"""
 You are a medical assistant. Answer ONLY from the context provided.
 - Be specific and use bullet points
 - Do not guess or add information not in context
@@ -148,14 +196,14 @@ Question:
 
 Answer:
 """)
-                        response = response_obj.content
+                                response = response_obj.content
                     
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                     
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-                    st.info("Please make sure the vectorstore is properly created.")
+                    st.info("Please check your configuration and try again.")
 
 if __name__ == "__main__":
     main()
