@@ -14,7 +14,7 @@ def load_documents():
     """Load documents from vectorstore without FAISS index"""
     try:
         # Try to load documents.pkl first
-        docs_path = f"{DB_FAISS_PATH}/index.pkl"
+        docs_path = f"{DB_FAISS_PATH}/documents.pkl"
         
         if not os.path.exists(docs_path):
             st.warning(f"No documents.pkl found at {docs_path}")
@@ -27,7 +27,6 @@ def load_documents():
                     if isinstance(data, dict):
                         documents = data.get('documents', data.get('chunks', []))
                         if documents:
-                            st.info(f"Loaded {len(documents)} documents from index.pkl")
                             return documents
             return []
         
@@ -38,12 +37,10 @@ def load_documents():
             # Handle different data structures
             if isinstance(data, list):
                 documents = data
-                st.info(f"✅ Loaded {len(documents)} documents from documents.pkl")
                 return documents
             elif isinstance(data, dict):
                 documents = data.get('documents', data.get('chunks', []))
                 if documents:
-                    st.info(f"✅ Loaded {len(documents)} documents from documents.pkl")
                     return documents
             elif isinstance(data, tuple):
                 # Try to extract documents from tuple
@@ -52,16 +49,12 @@ def load_documents():
                     if hasattr(item, 'page_content'):
                         documents.append(item)
                 if documents:
-                    st.info(f"✅ Loaded {len(documents)} documents from tuple structure")
                     return documents
             else:
-                st.warning(f"Unknown data type: {type(data)}")
                 return []
                 
     except Exception as e:
         st.error(f"Error loading documents: {e}")
-        import traceback
-        st.error(traceback.format_exc())
         return []
 
 # =========================
@@ -195,7 +188,6 @@ def main():
     
     # Title
     st.title("🏥 Health AI Medical Assistant")
-    st.caption("Your AI-powered medical information assistant based on trusted medical documents")
     
     # Check API key first
     if not st.secrets.get("GROQ_API_KEY", ""):
@@ -227,8 +219,7 @@ def main():
         
         if documents:
             st.markdown(f"### 📊 Database Stats")
-            st.markdown(f"- **Total documents:** {len(documents)}")
-            st.markdown(f"- **Status:** ✅ Active")
+            st.markdown(f"- **Documents loaded:** {len(documents)}")
             
             # Show document sources
             sources = set()
@@ -242,10 +233,6 @@ def main():
                 st.markdown("### 📄 Documents")
                 for source in list(sources)[:5]:
                     st.markdown(f"- {source}")
-        else:
-            st.markdown("### ⚠️ Status")
-            st.markdown("⚠️ No documents loaded")
-            st.markdown("The app will work without document retrieval")
         
         st.markdown("### ⚠️ Disclaimer")
         st.markdown("""
@@ -315,10 +302,6 @@ def main():
                     error_msg = "Sorry, I couldn't process your request. Please check your API key and try again."
                     st.error(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
-    
-    # Footer
-    st.markdown("---")
-    st.caption("💡 Tip: Ask specific questions about medical topics. The assistant will search through the loaded medical documents to find relevant information.")
 
 if __name__ == "__main__":
     main()
