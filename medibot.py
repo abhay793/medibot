@@ -92,13 +92,6 @@ def extract_doc_text(doc):
         return doc.get('page_content', '')
     return str(doc)
 
-def extract_doc_metadata(doc):
-    if hasattr(doc, 'metadata'):
-        return doc.metadata
-    elif isinstance(doc, dict):
-        return doc.get('metadata', {})
-    return {}
-
 # GROQ API CALL
 
 def get_groq_response(prompt, context=None):
@@ -133,17 +126,21 @@ ANSWER:"""
     except Exception as e:
         return f"Error: {e}"
 
-
 # MAIN APP
 
 def main():
-    st.set_page_config(page_title="Your Medical Assistant", page_icon="🏥")
+    st.set_page_config(
+        page_title="Health AI Medical Assistant", 
+        page_icon="🏥",
+        layout="wide"
+    )
     
-    # Custom CSS to hide the expander if needed
+    # Custom CSS for better styling
     st.markdown("""
     <style>
-    /* Optional: Hide the expander if you want to completely remove it */
-    /* .stExpander { display: none; } */
+    .sidebar-content {
+        padding: 1rem;
+    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -163,33 +160,68 @@ def main():
         with st.spinner("📚 Loading medical database..."):
             documents = load_documents()
     
-    # Sidebar 
+    # Sidebar with clean content
     with st.sidebar:
-        st.markdown("### ℹ️ About")
-        st.markdown("Medical AI Assistant using Groq's Llama 3.1")
+        st.markdown("### 📚 Knowledge Base")
+        st.markdown("Powered by trusted medical literature")
         
-        if documents:
-            # Only show a simple success message without the count
-            st.success("✅ Medical database active")
+        st.markdown("---")
         
-        st.markdown("### ⚠️ Disclaimer")
-        st.markdown("For informational purposes only. Consult healthcare professionals.")
+        st.markdown("### 💡 Features")
+        st.markdown("""
+        - Evidence-based medical information
+        - Quick access to verified sources
+        - 24/7 medical information support
+        """)
+        
+        st.markdown("---")
+        
+        st.markdown("### 📖 About")
+        st.markdown("""
+        This assistant provides information from:
+        - Medical textbooks
+        - Clinical guidelines
+        - Peer-reviewed medical literature
+        """)
+        
+        st.markdown("---")
+        
+        st.markdown("### ⚕️ Your Health Partner")
+        st.markdown("""
+        Get reliable medical information when you need it.
+        
+        **Note:** Always consult healthcare professionals for medical advice.
+        """)
+        
+        st.markdown("---")
+        
+        st.markdown("### 🔒 Privacy")
+        st.markdown("Your conversations are private and secure.")
+        
+        st.markdown("---")
+        
+        st.markdown("### 📞 Emergency")
+        st.markdown("**For medical emergencies, call emergency services immediately.**")
     
     # Chat interface
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
+    # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
+    # Chat input
     if prompt := st.chat_input("Ask about medical information..."):
+        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
+        # Generate assistant response
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+            with st.spinner("Searching medical literature..."):
                 context = None
                 if documents:
                     relevant = get_relevant_docs(documents, prompt, k=3)
