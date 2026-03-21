@@ -14,7 +14,7 @@ def load_documents():
     """Load documents from vectorstore without FAISS index"""
     try:
         # Try to load documents.pkl first
-        docs_path = f"{DB_FAISS_PATH}/documents.pkl"
+        docs_path = f"{DB_FAISS_PATH}/index.pkl"
         
         if not os.path.exists(docs_path):
             st.warning(f"No documents.pkl found at {docs_path}")
