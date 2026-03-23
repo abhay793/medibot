@@ -16,27 +16,29 @@ Health AI Medical Assistant combines the power of large language models with cur
 
 ## 🚀 Live Demo
 
-Deployed on Streamlit Cloud: https://medibot.streamlit.app
+Deployed on Streamlit Cloud: https://your-medical-chatbot.streamlit.app/
 
 ## 📁 Project Structure
 
 medical_chatbot/
-├── data/                           # Medical PDF documents
+├── data/                          
 │   └── The_GALE_ENCYCLOPEDIA_of_MEDICINE_SECOND.pdf
-├── vectorstore/                    # FAISS vector database
+
+├── vectorstore/                   
 │   └── db_faiss/
-│       ├── index.faiss            # FAISS index file
-│       ├── index.pkl              # Index metadata
-│       └── documents.pkl          # Processed documents
-├── medibot.py                      # Main Streamlit application
-├── create_memory_for_llm.py       # Vector database creator
-├── extract_real_documents.py      # Document extraction utility
-├── requirements.txt               # Python dependencies for non-pipenv users
-├── Pipfile                         # Pipenv dependencies
-├── Pipfile.lock                    # Locked dependencies
-├── .env.example                   # Environment variables template
-├── .gitignore                     # Git ignore rules
-└── README.md                      # Project documentation
+│       ├── index.faiss           
+│       ├── index.pkl             
+│       └── documents.pkl  
+
+├── medibot.py                     
+├── create_memory_for_llm.py      
+├── extract_real_documents.py     
+├── requirements.txt              
+├── Pipfile                        
+├── Pipfile.lock                  
+├── .env.example                  
+├── .gitignore                   
+└── README.md                     
 
 ## 🛠️ Technology Stack
 
